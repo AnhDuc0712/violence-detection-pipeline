@@ -9,9 +9,15 @@ FEATURE_COLUMNS = [
     "limb_amplitude",
     "joint_angle_var",
     "pose_motion_energy",
+
+    # flags
     "flag_reflection",
+    "flag_occlusion",
+    "flag_id_switch",
+    "flag_shadow_like",
     "flag_camera_motion",
 ]
+
 
 LABEL_COLUMN = "label"
 TRACKLET_ID = "tracklet_id"

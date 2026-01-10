@@ -1,26 +1,30 @@
+# src/step2_tracklet.py
+
 from pathlib import Path
 from collections import defaultdict, deque
 import numpy as np
 
-from pipeline.step1_detect import run_detect_track
+from pipeline.step1_detect_track import run_detect_track
+
 
 # ================= CONFIG =================
+
 TRACKLET_LEN = 16
 
-# Keypoints quan trọng cho bạo lực (YOLOv8 pose index)
-# Vai, khuỷu, cổ tay, hông, gối, mắt cá
+# YOLOv8 pose index được GIỮ LẠI (chưa remap ở STEP 2)
+# STEP 3 mới xử lý semantic joints
 KEYPOINT_IDX = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
 # ---------- FILTER / FLAG THRESHOLDS ----------
-EDGE_MARGIN = 40           # px, gần mép ảnh
-AREA_VAR_THRESH = 0.02     # biến thiên diện tích bbox thấp
-LOW_MOTION_THRESH = 2.0   # px/frame
-ID_SWITCH_DIST = 80.0      # px, nhảy tâm bbox lớn
-KP_MISS_RATIO = 0.35       # tỉ lệ keypoints thiếu
-CAMERA_MOTION_RATIO = 0.6 # tỉ lệ đối tượng cùng hướng chuyển động
+EDGE_MARGIN = 40
+AREA_VAR_THRESH = 0.02
+LOW_MOTION_THRESH = 2.0
+ID_SWITCH_DIST = 80.0
+KP_MISS_RATIO = 0.35
+CAMERA_MOTION_RATIO = 0.6
 # ---------------------------------------------
 
-# buffer cho mỗi người
+# buffer tracklet theo track_id
 buffers = defaultdict(lambda: deque(maxlen=TRACKLET_LEN))
 
 # ================= HELPER =================
@@ -51,47 +55,53 @@ def flag_reflection(tracklet, w, h):
     low_motion = np.mean(motion) < LOW_MOTION_THRESH
 
     score = 0
-    if near_edge_ratio > 0.6: score += 1
-    if area_var < AREA_VAR_THRESH: score += 1
-    if low_motion: score += 1
+    if near_edge_ratio > 0.6:
+        score += 1
+    if area_var < AREA_VAR_THRESH:
+        score += 1
+    if low_motion:
+        score += 1
 
     return score >= 2
 
+
 def flag_occlusion(tracklet):
-    # nhiều frame thiếu keypoints
-    kp_missing = []
+    missing = []
     for t in tracklet:
-        if t["keypoints"] is None:
-            kp_missing.append(1)
+        kp = t["keypoints"]
+        if kp is None:
+            missing.append(1)
         else:
-            kp_missing.append(np.isnan(t["keypoints"]).any())
-    return np.mean(kp_missing) > KP_MISS_RATIO
+            missing.append(np.isnan(kp).any())
+    return np.mean(missing) > KP_MISS_RATIO
+
 
 def flag_id_switch(tracklet):
     centers = np.array([bbox_center(t["bbox"]) for t in tracklet])
     jumps = np.linalg.norm(np.diff(centers, axis=0), axis=1)
     return np.max(jumps) > ID_SWITCH_DIST
 
+
 def flag_shadow_like(tracklet):
-    # bbox rất mỏng + chuyển động bám theo (diện tích rất nhỏ)
     bboxes = np.array([t["bbox"] for t in tracklet], dtype=np.float32)
     widths = bboxes[:, 2] - bboxes[:, 0]
     heights = bboxes[:, 3] - bboxes[:, 1]
     thin_ratio = np.mean((widths / (heights + 1e-6)) < 0.35)
     return thin_ratio > 0.6
 
+
 def flag_camera_motion(all_centers):
     """
-    all_centers: dict {track_id: [centers...]} trong cùng window
-    Nếu nhiều đối tượng cùng hướng chuyển động → camera motion
+    all_centers: dict {track_id: deque([center_t-1, center_t])}
+    Nếu nhiều object cùng hướng chuyển động → camera motion
     """
     if len(all_centers) < 2:
         return False
 
     motions = []
     for centers in all_centers.values():
-        if len(centers) >= 2:
-            motions.append(centers[-1] - centers[-2])
+        if len(centers) == 2:
+            motions.append(centers[1] - centers[0])
 
     if len(motions) < 2:
         return False
@@ -100,24 +110,29 @@ def flag_camera_motion(all_centers):
     norms = np.linalg.norm(motions, axis=1) + 1e-6
     motions_n = motions / norms[:, None]
 
-    # độ đồng hướng
     sim = np.dot(motions_n, motions_n.T)
     ratio = np.mean(sim > 0.9)
+
     return ratio > CAMERA_MOTION_RATIO
 
 # ================= MAIN =================
 
-def process_tracklets(video_path: Path, model_path: Path, show=False):
+def process_tracklets(
+    video_path: Path,
+    model_path: Path,
+    show: bool = False
+):
     """
-    STEP 2 FINAL:
-    - Gom tracklet
-    - Nén dữ liệu
-    - Cắm cờ rủi ro (KHÔNG loại bỏ)
+    STEP 2:
+    - Gom tracklet theo track_id
+    - Gắn cờ rủi ro (KHÔNG loại bỏ)
+    - Yield dict cho STEP 3
     """
+
     frame_idx = 0
     frame_w, frame_h = None, None
 
-    # phục vụ camera motion
+    # phục vụ camera motion (frame-level)
     recent_centers = defaultdict(lambda: deque(maxlen=2))
 
     for r in run_detect_track(video_path, model_path, show=show):
@@ -129,19 +144,19 @@ def process_tracklets(video_path: Path, model_path: Path, show=False):
         if r.boxes.id is None:
             continue
 
-        boxes = r.boxes.xyxy.cpu().numpy().astype(np.float16)
+        boxes = r.boxes.xyxy.cpu().numpy().astype(np.float32)
         track_ids = r.boxes.id.cpu().numpy().astype(np.int32)
 
         if r.keypoints is not None:
             kps = r.keypoints.xy.cpu().numpy()
-            kps = kps[:, KEYPOINT_IDX, :].astype(np.float16)
+            kps = kps[:, KEYPOINT_IDX, :].astype(np.float32)
         else:
             kps = None
 
         # cập nhật centers cho camera motion
         for i, tid in enumerate(track_ids):
             recent_centers[int(tid)].append(
-                bbox_center(boxes[i].astype(np.float32))
+                bbox_center(boxes[i])
             )
 
         for i, tid in enumerate(track_ids):
@@ -149,7 +164,7 @@ def process_tracklets(video_path: Path, model_path: Path, show=False):
                 "track_id": int(tid),
                 "bbox": boxes[i],
                 "keypoints": kps[i] if kps is not None else None,
-                "frame_idx": np.int32(frame_idx)
+                "frame_idx": frame_idx
             })
 
             if len(buffers[int(tid)]) == TRACKLET_LEN:
@@ -169,6 +184,7 @@ def process_tracklets(video_path: Path, model_path: Path, show=False):
                 }
 
 # ================= TEST =================
+
 if __name__ == "__main__":
     BASE_DIR = Path(__file__).resolve().parent.parent
     VIDEO_PATH = BASE_DIR / "data" / "videos" / "test.mp4"
