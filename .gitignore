@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual env
+venv/
+.env
+
+# Data
+data/
+dataset_v1/
+*.mp4
+*.avi
+*.mov
+
+# Models
+*.pt
+*.pth
+*.onnx
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
