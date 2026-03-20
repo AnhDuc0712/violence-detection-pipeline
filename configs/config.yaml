@@ -1,0 +1,63 @@
+# =========================
+# 📂 PATHS
+# =========================
+paths:
+  video: "C:/project/violence_detection/data/test thực tế/test4.mp4"
+  model: "C:/project/violence_detection/models/violence_model (1).pkl"
+  yolo: "C:/project/violence_detection/models/yolov8m-pose.pt"
+  output: "C:/project/violence_detection/data/outputs/ket_qua_final_filtered.mp4"
+
+
+# =========================
+# 🎥 YOLO SETTINGS
+# =========================
+yolo:
+  conf_threshold: 0.25
+  img_size: 640
+
+
+# =========================
+# 🧵 TRACKING
+# =========================
+tracking:
+  tracklet_len: 16
+  stride: 1
+  max_frame_gap: 30
+  max_pixel_dist: 150
+  similarity_thresh: 0.6
+
+
+# =========================
+# 🤝 INTERACTION
+# =========================
+interaction:
+  interaction_far: 10.0
+  iou_threshold: 0.3
+
+
+# =========================
+# ⚡ FEATURE
+# =========================
+feature:
+  peak_vel_thresh: 0.6
+  wrist_conf_thresh: 0.35
+
+
+# =========================
+# 🧠 MODEL
+# =========================
+model:
+  violence_threshold: 0.65
+
+
+# =========================
+# 🎨 VISUAL
+# =========================
+visual:
+  colors:
+    STRIKING: [0, 0, 255]
+    GRAPPLING: [0, 0, 255]
+    HUGGING: [0, 255, 0]
+    CLOSE: [0, 255, 255]
+    RUNNING: [0, 165, 255]
+    NEUTRAL: [200, 200, 200]
